@@ -744,6 +744,9 @@ public class WifiStateMachine extends StateMachine implements WifiNative.WifiPno
     /* alert from firmware */
     static final int CMD_FIRMWARE_ALERT                                 = BASE + 100;
 
+    /* SIM is removed; reset any cached data for it */
+    static final int CMD_RESET_SIM_NETWORKS                             = BASE + 101;
+
     /**
      * Make this timer 40 seconds, which is about the normal DHCP timeout.
      * In no valid case, the WiFiStateMachine should remain stuck in ObtainingIpAddress
@@ -2483,6 +2486,14 @@ public class WifiStateMachine extends StateMachine implements WifiNative.WifiPno
             setCountryCode(mDefaultCountryCode, /* persist = */ true);
         }
     }
+
+    /**
+     * reset cached SIM credential data
+     */
+    public synchronized void resetSimAuthNetworks() {
+        sendMessage(CMD_RESET_SIM_NETWORKS);
+    }
+
 
     /**
      * Get Network object of current wifi network
@@ -8613,6 +8624,17 @@ public class WifiStateMachine extends StateMachine implements WifiNative.WifiPno
                 case CMD_STOP_RSSI_MONITORING_OFFLOAD:
                     stopRssiMonitoringOffload();
                     break;
+                case CMD_RESET_SIM_NETWORKS:
+                    if (mLastNetworkId != WifiConfiguration.INVALID_NETWORK_ID) {
+                        WifiConfiguration config =
+                                mWifiConfigStore.getWifiConfiguration(mLastNetworkId);
+                        if (mWifiConfigStore.isSimConfig(config)) {
+                            mWifiNative.disconnect();
+                            transitionTo(mDisconnectingState);
+                        }
+                    }
+                    /* allow parent state to reset data for other networks */
+                    return NOT_HANDLED;
                 default:
                     return NOT_HANDLED;
             }
