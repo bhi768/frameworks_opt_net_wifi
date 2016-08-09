@@ -373,6 +373,8 @@ public final class WifiServiceImpl extends IWifiManager.Stub {
                     public void onReceive(Context context, Intent intent) {
                         String state = intent.getStringExtra(IccCardConstants.INTENT_KEY_ICC_STATE);
                         if (state.equals(IccCardConstants.INTENT_VALUE_ICC_ABSENT)) {
+                            Log.d(TAG, "resetting networks because SIM was removed");
+                            mWifiStateMachine.resetSimAuthNetworks();
                             Log.d(TAG, "resetting country code because SIM is removed");
                             mWifiStateMachine.resetCountryCode();
                         }
@@ -1160,6 +1162,21 @@ public final class WifiServiceImpl extends IWifiManager.Stub {
         //TODO: Should move towards adding a driver API that checks at runtime
         return mContext.getResources().getBoolean(
                 com.android.internal.R.bool.config_wifi_dual_band_support);
+    }
+
+     /**
+     * Is Ad-Hoc (IBSS) mode supported by the driver?
+     * Will only return correct results when we have reached WIFI_STATE_ENABLED
+     * @return {@code true} if IBSS mode is supported, {@code false} if not
+     */
+    public boolean isIbssSupported() {
+        enforceAccessPermission();
+        if (mWifiStateMachineChannel != null) {
+            return (mWifiStateMachine.syncIsIbssSupported(mWifiStateMachineChannel) == 1);
+        } else {
+            Slog.e(TAG, "mWifiStateMachineChannel is not initialized");
+            return false;
+        }
     }
 
     /**

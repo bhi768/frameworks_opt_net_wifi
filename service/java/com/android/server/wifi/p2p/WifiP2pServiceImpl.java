@@ -522,6 +522,7 @@ public final class WifiP2pServiceImpl extends IWifiP2pManager.Stub {
         });
         private final WifiP2pInfo mWifiP2pInfo = new WifiP2pInfo();
         private WifiP2pGroup mGroup;
+        private boolean mPendingReformGroupIndication = false;
 
         // Saved WifiP2pConfig for an ongoing peer connection. This will never be null.
         // The deviceAddress will be an empty string when the device is inactive
@@ -563,7 +564,7 @@ public final class WifiP2pServiceImpl extends IWifiP2pManager.Stub {
     class DefaultState extends State {
         @Override
         public boolean processMessage(Message message) {
-            if (DBG) logd(getName() + message.toString());
+            if (DBG) logd(getName() + " " + message.toString());
             switch (message.what) {
                 case AsyncChannel.CMD_CHANNEL_HALF_CONNECTED:
                     if (message.arg1 == AsyncChannel.STATUS_SUCCESSFUL) {
@@ -761,6 +762,7 @@ public final class WifiP2pServiceImpl extends IWifiP2pManager.Stub {
     class P2pNotSupportedState extends State {
         @Override
         public boolean processMessage(Message message) {
+            if (DBG) logd(getName() + " " + message.toString());
             switch (message.what) {
                case WifiP2pManager.DISCOVER_PEERS:
                     replyToMessage(message, WifiP2pManager.DISCOVER_PEERS_FAILED,
@@ -858,7 +860,7 @@ public final class WifiP2pServiceImpl extends IWifiP2pManager.Stub {
 
         @Override
         public boolean processMessage(Message message) {
-            if (DBG) logd(getName() + message.toString());
+            if (DBG) logd(getName() + " " + message.toString());
             switch (message.what) {
                 case WifiMonitor.SUP_DISCONNECTION_EVENT:
                     if (DBG) logd("p2p socket connection lost");
@@ -894,7 +896,7 @@ public final class WifiP2pServiceImpl extends IWifiP2pManager.Stub {
 
         @Override
         public boolean processMessage(Message message) {
-            if (DBG) logd(getName() + message.toString());
+            if (DBG) logd(getName() + " " + message.toString());
             switch (message.what) {
                 case WifiStateMachine.CMD_ENABLE_P2P:
                     try {
@@ -922,7 +924,7 @@ public final class WifiP2pServiceImpl extends IWifiP2pManager.Stub {
 
         @Override
         public boolean processMessage(Message message) {
-            if (DBG) logd(getName() + message.toString());
+            if (DBG) logd(getName() + " " + message.toString());
             switch (message.what) {
                 case WifiMonitor.SUP_CONNECTION_EVENT:
                     if (DBG) logd("P2p socket connection successful");
@@ -955,7 +957,7 @@ public final class WifiP2pServiceImpl extends IWifiP2pManager.Stub {
 
         @Override
         public boolean processMessage(Message message) {
-            if (DBG) logd(getName() + message.toString());
+            if (DBG) logd(getName() + " " + message.toString());
             switch (message.what) {
                 case WifiMonitor.SUP_DISCONNECTION_EVENT:
                     loge("Unexpected loss of p2p socket connection");
@@ -1212,7 +1214,7 @@ public final class WifiP2pServiceImpl extends IWifiP2pManager.Stub {
 
         @Override
         public boolean processMessage(Message message) {
-            if (DBG) logd(getName() + message.toString());
+            if (DBG) logd(getName() + " " + message.toString());
             switch (message.what) {
                 case WifiP2pManager.CONNECT:
                     if (DBG) logd(getName() + " sending connect");
@@ -1417,7 +1419,7 @@ public final class WifiP2pServiceImpl extends IWifiP2pManager.Stub {
 
         @Override
         public boolean processMessage(Message message) {
-            if (DBG) logd(getName() + message.toString());
+            if (DBG) logd(getName() + " " + message.toString());
             boolean ret = HANDLED;
             switch (message.what) {
                case GROUP_CREATING_TIMED_OUT:
@@ -1479,7 +1481,7 @@ public final class WifiP2pServiceImpl extends IWifiP2pManager.Stub {
 
         @Override
         public boolean processMessage(Message message) {
-            if (DBG) logd(getName() + message.toString());
+            if (DBG) logd(getName() + " " + message.toString());
             boolean ret = HANDLED;
             switch (message.what) {
                 case PEER_CONNECTION_USER_ACCEPT:
@@ -1514,7 +1516,7 @@ public final class WifiP2pServiceImpl extends IWifiP2pManager.Stub {
 
         @Override
         public boolean processMessage(Message message) {
-            if (DBG) logd(getName() + message.toString());
+            if (DBG) logd(getName() + " " + message.toString());
             boolean ret = HANDLED;
             switch (message.what) {
                 case PEER_CONNECTION_USER_ACCEPT:
@@ -1554,7 +1556,7 @@ public final class WifiP2pServiceImpl extends IWifiP2pManager.Stub {
 
         @Override
         public boolean processMessage(Message message) {
-            if (DBG) logd(getName() + message.toString());
+            if (DBG) logd(getName() + " " + message.toString());
             WifiP2pProvDiscEvent provDisc;
             WifiP2pDevice device;
             switch (message.what) {
@@ -1615,17 +1617,25 @@ public final class WifiP2pServiceImpl extends IWifiP2pManager.Stub {
         @Override
         public void enter() {
             if (DBG) logd(getName());
+             mPendingReformGroupIndication = false;
         }
 
         @Override
         public boolean processMessage(Message message) {
-            if (DBG) logd(getName() + message.toString());
+            if (DBG) logd(getName() + " " + message.toString());
             switch (message.what) {
                 // We ignore these right now, since we get a GROUP_STARTED notification
                 // afterwards
                 case WifiMonitor.P2P_GO_NEGOTIATION_SUCCESS_EVENT:
                 case WifiMonitor.P2P_GROUP_FORMATION_SUCCESS_EVENT:
                     if (DBG) logd(getName() + " go success");
+                    break;
+                // Action of removing and reforming group will be taken
+                // when we enter in GroupCreatedState
+                case WifiMonitor.P2P_REMOVE_AND_REFORM_GROUP_EVENT:
+                    logd("P2P_REMOVE_AND_REFORM_GROUP_EVENT event received"
+                         + " in GroupNegotiationState state");
+                    mPendingReformGroupIndication = true;
                     break;
                 case WifiMonitor.P2P_GROUP_STARTED_EVENT:
                     mGroup = (WifiP2pGroup) message.obj;
@@ -1788,14 +1798,14 @@ public final class WifiP2pServiceImpl extends IWifiP2pManager.Stub {
 
         @Override
         public boolean processMessage(Message message) {
-            if (DBG) logd(getName() + message.toString());
+            if (DBG) logd(getName() + " " + message.toString());
             switch (message.what) {
                 case WifiMonitor.P2P_GO_NEGOTIATION_SUCCESS_EVENT:
                 case WifiMonitor.P2P_GROUP_FORMATION_SUCCESS_EVENT:
-                    loge(getName() + "group sucess during freq conflict!");
+                    loge(getName() + " group sucess during freq conflict!");
                     break;
                 case WifiMonitor.P2P_GROUP_STARTED_EVENT:
-                    loge(getName() + "group started after freq conflict, handle anyway");
+                    loge(getName() + " group started after freq conflict, handle anyway");
                     deferMessage(message);
                     transitionTo(mGroupNegotiationState);
                     break;
@@ -1816,7 +1826,7 @@ public final class WifiP2pServiceImpl extends IWifiP2pManager.Stub {
                     break;
                 case DISCONNECT_WIFI_RESPONSE:
                     // Got a response from wifistatemachine, retry p2p
-                    if (DBG) logd(getName() + "Wifi disconnected, retry p2p");
+                    if (DBG) logd(getName() + " Wifi disconnected, retry p2p");
                     transitionTo(mInactiveState);
                     sendMessage(WifiP2pManager.CONNECT, mSavedPeerConfig);
                     break;
@@ -1832,30 +1842,56 @@ public final class WifiP2pServiceImpl extends IWifiP2pManager.Stub {
     }
 
     class GroupCreatedState extends State {
+
+        private boolean handlP2pGroupRestart() {
+            boolean remove = true;
+            if (mWifiNative.p2pGroupRemove(mGroup.getInterface())) {
+                Slog.d(TAG, "Removed P2P group successfully");
+                transitionTo(mOngoingGroupRemovalState);
+            } else {
+                Slog.d(TAG, "Failed to remove the P2P group");
+                handleGroupRemoved();
+                transitionTo(mInactiveState);
+                remove = false;
+            }
+            if (mAutonomousGroup) {
+                Slog.d(TAG, "AutonomousGroup is set, reform P2P Group");
+                sendMessage(WifiP2pManager.CREATE_GROUP);
+            } else {
+                Slog.d(TAG, "AutonomousGroup is not set, will not reform P2P Group");
+            }
+            return remove;
+        }
+
         @Override
         public void enter() {
-            if (DBG) logd(getName());
-            // Once connected, peer config details are invalid
-            mSavedPeerConfig.invalidate();
-            mNetworkInfo.setDetailedState(NetworkInfo.DetailedState.CONNECTED, null, null);
+            logd(getName() + " mPendingReformGroupIndication=" + mPendingReformGroupIndication);
+            if (mPendingReformGroupIndication) {
+                mPendingReformGroupIndication = false;
+                handlP2pGroupRestart();
+            } else {
+                // Once connected, peer config details are invalid
+                mSavedPeerConfig.invalidate();
+                mNetworkInfo.setDetailedState(NetworkInfo.DetailedState.CONNECTED, null, null);
 
-            updateThisDevice(WifiP2pDevice.CONNECTED);
+                updateThisDevice(WifiP2pDevice.CONNECTED);
 
-            //DHCP server has already been started if I am a group owner
-            if (mGroup.isGroupOwner()) {
-                setWifiP2pInfoOnGroupFormation(NetworkUtils.numericToInetAddress(SERVER_ADDRESS));
-            }
+                //DHCP server has already been started if I am a group owner
+                if (mGroup.isGroupOwner()) {
+                    setWifiP2pInfoOnGroupFormation(NetworkUtils.numericToInetAddress(SERVER_ADDRESS));
+                }
 
-            // In case of a negotiation group, connection changed is sent
-            // after a client joins. For autonomous, send now
-            if (mAutonomousGroup) {
-                sendP2pConnectionChangedBroadcast();
+                // In case of a negotiation group, connection changed is sent
+                // after a client joins. For autonomous, send now
+                if (mAutonomousGroup) {
+                    sendP2pConnectionChangedBroadcast();
+                }
             }
         }
 
         @Override
         public boolean processMessage(Message message) {
-            if (DBG) logd(getName() + message.toString());
+            if (DBG) logd(getName() + " " + message.toString());
             switch (message.what) {
                 case WifiMonitor.AP_STA_CONNECTED_EVENT:
                     WifiP2pDevice device = (WifiP2pDevice) message.obj;
@@ -1902,6 +1938,20 @@ public final class WifiP2pServiceImpl extends IWifiP2pManager.Stub {
                         if (DBG) logd(getName() + " ap sta disconnected");
                     } else {
                         loge("Disconnect on unknown device: " + device);
+                    }
+                    break;
+                case WifiMonitor.P2P_REMOVE_AND_REFORM_GROUP_EVENT:
+                    /* First remove p2p group and then restart only if
+                     * autonoums group formation is set to true
+                     */
+                    Slog.d(TAG, "Received event P2P_REMOVE_AND_REFORM_GROUP, remove P2P group");
+                    if (handlP2pGroupRestart()) {
+                        replyToMessage(message,
+                            WifiP2pManager.REMOVE_GROUP_SUCCEEDED);
+                    } else {
+                        replyToMessage(message,
+                            WifiP2pManager.REMOVE_GROUP_FAILED,
+                            WifiP2pManager.ERROR);
                     }
                     break;
                 case DhcpStateMachine.CMD_POST_DHCP_ACTION:
@@ -2080,7 +2130,7 @@ public final class WifiP2pServiceImpl extends IWifiP2pManager.Stub {
 
         @Override
         public boolean processMessage(Message message) {
-            if (DBG) logd(getName() + message.toString());
+            if (DBG) logd(getName() + " " + message.toString());
             switch (message.what) {
                 case WifiMonitor.P2P_PROV_DISC_PBC_REQ_EVENT:
                 case WifiMonitor.P2P_PROV_DISC_ENTER_PIN_EVENT:
@@ -2122,7 +2172,7 @@ public final class WifiP2pServiceImpl extends IWifiP2pManager.Stub {
 
         @Override
         public boolean processMessage(Message message) {
-            if (DBG) logd(getName() + message.toString());
+            if (DBG) logd(getName() + " " + message.toString());
             switch (message.what) {
                 // Group removal ongoing. Multiple calls
                 // end up removing persisted network. Do nothing.

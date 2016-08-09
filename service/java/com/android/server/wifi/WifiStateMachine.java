@@ -197,6 +197,7 @@ public class WifiStateMachine extends StateMachine implements WifiNative.WifiPno
     private DummyWifiLogger mWifiLogger;
     private WifiApConfigStore mWifiApConfigStore;
     private final boolean mP2pSupported;
+    private boolean mIbssSupported;
     private final AtomicBoolean mP2pConnected = new AtomicBoolean(false);
     private boolean mTemporarilyDisconnectWifi = false;
     private final String mPrimaryDeviceType;
@@ -743,6 +744,9 @@ public class WifiStateMachine extends StateMachine implements WifiNative.WifiPno
     /* alert from firmware */
     static final int CMD_FIRMWARE_ALERT                                 = BASE + 100;
 
+    /* SIM is removed; reset any cached data for it */
+    static final int CMD_RESET_SIM_NETWORKS                             = BASE + 101;
+
     /**
      * Make this timer 40 seconds, which is about the normal DHCP timeout.
      * In no valid case, the WiFiStateMachine should remain stuck in ObtainingIpAddress
@@ -838,6 +842,9 @@ public class WifiStateMachine extends StateMachine implements WifiNative.WifiPno
     static final int CMD_RSSI_THRESHOLD_BREACH                          = BASE + 164;
 
 
+
+    /* Is IBSS mode supported by the driver? */
+    static final int CMD_GET_IBSS_SUPPORTED                             = BASE + 200;
 
     /* Wifi state machine modes of operation */
     /* CONNECT_MODE - connect to any 'known' AP when it becomes available */
@@ -1093,6 +1100,8 @@ public class WifiStateMachine extends StateMachine implements WifiNative.WifiPno
     private final IBatteryStats mBatteryStats;
 
     private String mTcpBufferSizes = null;
+    private int mTcpDelayedAckSegments = 1;
+    private int mTcpUserCfg = 0;
 
     // Used for debug and stats gathering
     private static int sScanAlarmIntentCount = 0;
@@ -1309,6 +1318,8 @@ public class WifiStateMachine extends StateMachine implements WifiNative.WifiPno
 
         mTcpBufferSizes = mContext.getResources().getString(
                 com.android.internal.R.string.config_wifi_tcp_buffers);
+        mTcpDelayedAckSegments = SystemProperties.getInt("net.tcp.delack.wifi", 1);
+        mTcpUserCfg = SystemProperties.getInt("net.tcp.usercfg.wifi", 0);
 
         addState(mDefaultState);
             addState(mInitialState, mDefaultState);
@@ -1658,6 +1669,7 @@ public class WifiStateMachine extends StateMachine implements WifiNative.WifiPno
                     } catch (NumberFormatException e) {
                     }
                     c.isDFS = line.contains("(DFS)");
+                    c.ibssAllowed = !line.contains("(NO_IBSS)");
                     list.add(c);
                 } else if (line.contains("Mode[B] Channels:")) {
                     // B channels are the same as G channels, skipped
@@ -2476,6 +2488,14 @@ public class WifiStateMachine extends StateMachine implements WifiNative.WifiPno
     }
 
     /**
+     * reset cached SIM credential data
+     */
+    public synchronized void resetSimAuthNetworks() {
+        sendMessage(CMD_RESET_SIM_NETWORKS);
+    }
+
+
+    /**
      * Get Network object of current wifi network
      * @return Network object of current wifi network
      */
@@ -2485,6 +2505,13 @@ public class WifiStateMachine extends StateMachine implements WifiNative.WifiPno
         } else {
             return null;
         }
+    }
+
+    public int syncIsIbssSupported(AsyncChannel channel) {
+        Message resultMsg = channel.sendMessageSynchronously(CMD_GET_IBSS_SUPPORTED);
+        int result = resultMsg.arg1;
+        resultMsg.recycle();
+        return result;
     }
 
     /**
@@ -4530,6 +4557,8 @@ public class WifiStateMachine extends StateMachine implements WifiNative.WifiPno
         if (!TextUtils.isEmpty(mTcpBufferSizes)) {
             newLp.setTcpBufferSizes(mTcpBufferSizes);
         }
+        newLp.setTcpDelayedAckSegments(mTcpDelayedAckSegments);
+        newLp.setTcpUserCfg(mTcpUserCfg);
 
         // IPv4/v6 addresses, IPv6 routes and IPv6 DNS servers come from netlink.
         LinkProperties netlinkLinkProperties = mNetlinkTracker.getLinkProperties();
@@ -5277,8 +5306,10 @@ public class WifiStateMachine extends StateMachine implements WifiNative.WifiPno
         }
 
         try {
-            mNwService.wifiFirmwareReload(mInterfaceName, "AP");
-            if (DBG) Log.d(TAG, "Firmware reloaded in AP mode");
+            if (!SystemProperties.getBoolean("ro.disableWifiApFirmwareReload", false)) {
+                mNwService.wifiFirmwareReload(mInterfaceName, "AP");
+                if (DBG) Log.d(TAG, "Firmware reloaded in AP mode");
+            }
         } catch (Exception e) {
             Log.e(TAG, "Failed to reload AP firmware " + e);
         }
@@ -5550,6 +5581,7 @@ public class WifiStateMachine extends StateMachine implements WifiNative.WifiPno
                 case CMD_ADD_OR_UPDATE_NETWORK:
                 case CMD_REMOVE_NETWORK:
                 case CMD_SAVE_CONFIG:
+                case CMD_GET_IBSS_SUPPORTED:
                     replyToMessage(message, message.what, FAILURE);
                     break;
                 case CMD_GET_CAPABILITY_FREQ:
@@ -5803,6 +5835,12 @@ public class WifiStateMachine extends StateMachine implements WifiNative.WifiPno
             logStateAndMessage(message, getClass().getSimpleName());
             switch (message.what) {
                 case CMD_START_SUPPLICANT:
+                   /* Stop a running supplicant after a runtime restart
+                    * Avoids issues with drivers that do not handle interface down
+                    * on a running supplicant properly.
+                    */
+                    mWifiMonitor.killSupplicant(mP2pSupported);
+
                     if (mWifiNative.loadDriver()) {
                         try {
                             mNwService.wifiFirmwareReload(mInterfaceName, "STA");
@@ -5833,12 +5871,6 @@ public class WifiStateMachine extends StateMachine implements WifiNative.WifiPno
                         } catch (IllegalStateException ie) {
                             loge("Unable to change interface settings: " + ie);
                         }
-
-                       /* Stop a running supplicant after a runtime restart
-                        * Avoids issues with drivers that do not handle interface down
-                        * on a running supplicant properly.
-                        */
-                        mWifiMonitor.killSupplicant(mP2pSupported);
 
                         if (WifiNative.startHal() == false) {
                             /* starting HAL is optional */
@@ -5936,6 +5968,8 @@ public class WifiStateMachine extends StateMachine implements WifiNative.WifiPno
                     }
                     initializeWpsDetails();
 
+                    mIbssSupported = mWifiNative.getModeCapability("IBSS");
+
                     sendSupplicantConnectionChangedBroadcast(true);
                     transitionTo(mDriverStartedState);
                     break;
@@ -5964,6 +5998,7 @@ public class WifiStateMachine extends StateMachine implements WifiNative.WifiPno
                 case CMD_SET_FREQUENCY_BAND:
                 case CMD_START_PACKET_FILTERING:
                 case CMD_STOP_PACKET_FILTERING:
+                case CMD_GET_IBSS_SUPPORTED:
                     messageHandlingStatus = MESSAGE_HANDLING_STATUS_DEFERRED;
                     deferMessage(message);
                     break;
@@ -6101,6 +6136,13 @@ public class WifiStateMachine extends StateMachine implements WifiNative.WifiPno
                     }
 
                     mWifiP2pChannel.sendMessage(WifiP2pServiceImpl.SET_COUNTRY_CODE, country);
+                    break;
+               case CMD_RESET_SIM_NETWORKS:
+                    log("resetting EAP-SIM/AKA/AKA' networks since SIM was removed");
+                    mWifiConfigStore.resetSimNetworks();
+                    break;
+                case CMD_GET_IBSS_SUPPORTED:
+                    deferMessage(message);
                     break;
                 default:
                     return NOT_HANDLED;
@@ -6485,6 +6527,9 @@ public class WifiStateMachine extends StateMachine implements WifiNative.WifiPno
                     }
                     break;
                 }
+                case CMD_GET_IBSS_SUPPORTED:
+                    replyToMessage(message, message.what, mIbssSupported ? 1 : 0);
+                    break;
                 default:
                     return NOT_HANDLED;
             }
@@ -8203,6 +8248,9 @@ public class WifiStateMachine extends StateMachine implements WifiNative.WifiPno
             if (!TextUtils.isEmpty(mTcpBufferSizes)) {
                 mLinkProperties.setTcpBufferSizes(mTcpBufferSizes);
             }
+            mLinkProperties.setTcpDelayedAckSegments(mTcpDelayedAckSegments);
+            mLinkProperties.setTcpUserCfg(mTcpUserCfg);
+
             mNetworkAgent = new WifiNetworkAgent(getHandler().getLooper(), mContext,
                     "WifiNetworkAgent", mNetworkInfo, mNetworkCapabilitiesFilter,
                     mLinkProperties, 60);
@@ -8576,6 +8624,17 @@ public class WifiStateMachine extends StateMachine implements WifiNative.WifiPno
                 case CMD_STOP_RSSI_MONITORING_OFFLOAD:
                     stopRssiMonitoringOffload();
                     break;
+                case CMD_RESET_SIM_NETWORKS:
+                    if (mLastNetworkId != WifiConfiguration.INVALID_NETWORK_ID) {
+                        WifiConfiguration config =
+                                mWifiConfigStore.getWifiConfiguration(mLastNetworkId);
+                        if (mWifiConfigStore.isSimConfig(config)) {
+                            mWifiNative.disconnect();
+                            transitionTo(mDisconnectingState);
+                        }
+                    }
+                    /* allow parent state to reset data for other networks */
+                    return NOT_HANDLED;
                 default:
                     return NOT_HANDLED;
             }
