@@ -226,7 +226,7 @@ static void ssid_encode(char *txt, size_t maxlen, const char *data, unsigned int
             *txt++ = 't';
             break;
         default:
-            if (data[i] >= 32 && data[i] <= 127) {
+            if (data[i] >= 32 && data[i] < 127) {
                 *txt++ = data[i];
             } else {
                 txt += snprintf(txt, end - txt, "\\x%02x",
@@ -514,10 +514,15 @@ jboolean setNetworkVariable(char *buf)
         ALOGD("parse SET_NETWORK command success, netId = %d, name = %s, value =%s, length=%d",
                netId, name, value, strlen(value));
 
+    if (NULL == g_pItemListMutex) {
+        /* Driver is unloaded, g_pItemList, g_pItemListMutex are NULL */
+        return JNI_TRUE;
+    }
     pthread_mutex_lock(g_pItemListMutex);
     pTmpItemNode = g_pItemList;
     if (NULL == pTmpItemNode) {
-        ALOGE("g_pItemList is NULL");
+        if (DBG)
+            ALOGD("g_pItemList is NULL");
     }
     while (pTmpItemNode) {
         if (pTmpItemNode->ssid_utf8) {
