@@ -163,22 +163,6 @@ int wifi_load_driver() {
 
   if (wifi_change_driver_state(WIFI_DRIVER_STATE_ON) < 0) return -1;
 #endif
-#ifdef WIFI_DRIVER_LOAD_DELAY
-  // initial load done?
-  if (property_get(DRIVER_INIT_PROP_NAME, driver_init_status, NULL) > 0 &&
-      !strcmp(driver_init_status, "ok")) {
-    property_set(DRIVER_PROP_NAME, "ok");
-    return 0;
-  }
-
-  int count = 5; /* wait at most 10 seconds for completion */
-  while (count-- > 0) {
-    if (is_wifi_driver_loaded()) break;
-    usleep(1000000);
-  }
-  // never wait again
-  property_set(DRIVER_INIT_PROP_NAME, "ok");
-#endif
   property_set(DRIVER_PROP_NAME, "ok");
   return 0;
 }
