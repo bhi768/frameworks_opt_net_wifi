@@ -68,6 +68,13 @@ public class CarrierNetworkConfig {
         mDbg = verbose > 0;
     }
 
+    /**
+     * Enable/disable verbose logging.
+     */
+    public void enableVerboseLogging(int verbose) {
+        mDbg = verbose > 0;
+    }
+
     public CarrierNetworkConfig(@NonNull Context context, @NonNull Looper looper,
             @NonNull FrameworkFacade framework) {
         mCarrierNetworkMap = new HashMap<>();
