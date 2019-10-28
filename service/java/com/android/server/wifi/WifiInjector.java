@@ -204,7 +204,7 @@ public class WifiInjector {
                 mCellularLinkLayerStatsCollector);
         // Modules interacting with Native.
         mWifiMonitor = new WifiMonitor(this);
-        mHalDeviceManager = new HalDeviceManager(mClock, clientModeImplLooper);
+        mHalDeviceManager = new HalDeviceManager(mClock);
         mWifiVendorHal =
                 new WifiVendorHal(mHalDeviceManager, mWifiCoreHandlerThread.getLooper());
         mSupplicantStaIfaceHal =

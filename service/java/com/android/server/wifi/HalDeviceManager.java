@@ -37,7 +37,6 @@ import android.hidl.manager.V1_2.IServiceManager;
 import android.os.Handler;
 import android.os.HidlSupport.Mutable;
 import android.os.HwRemoteBinder;
-import android.os.Looper;
 import android.os.RemoteException;
 import android.util.Log;
 import android.util.LongSparseArray;
@@ -74,19 +73,13 @@ public class HalDeviceManager {
     public static final int START_HAL_RETRY_TIMES = 3;
 
     private final Clock mClock;
-    private final Handler mEventHandler;
-    private WifiDeathRecipient mIWifiDeathRecipient;
-    private ServiceManagerDeathRecipient mServiceManagerDeathRecipient;
 
     // cache the value for supporting vendor HAL or not
     private boolean mIsVendorHalSupported = false;
 
     // public API
-    public HalDeviceManager(Clock clock, Looper looper) {
+    public HalDeviceManager(Clock clock) {
         mClock = clock;
-        mEventHandler = new Handler(looper);
-        mIWifiDeathRecipient = new WifiDeathRecipient();
-        mServiceManagerDeathRecipient = new ServiceManagerDeathRecipient();
 
         mInterfaceAvailableForRequestListeners.put(IfaceType.STA, new HashMap<>());
         mInterfaceAvailableForRequestListeners.put(IfaceType.AP, new HashMap<>());
@@ -638,19 +631,15 @@ public class HalDeviceManager {
         mRttControllerLifecycleCallbacks.clear();
     }
 
-    private class ServiceManagerDeathRecipient implements HwRemoteBinder.DeathRecipient {
-        @Override
-        public void serviceDied(long cookie) {
-            mEventHandler.post(() -> {
+    private final HwRemoteBinder.DeathRecipient mServiceManagerDeathRecipient =
+            cookie -> {
                 Log.wtf(TAG, "IServiceManager died: cookie=" + cookie);
                 synchronized (mLock) {
                     mServiceManager = null;
                     // theoretically can call initServiceManager again here - but
                     // there's no point since most likely system is going to reboot
                 }
-            });
-        }
-    }
+            };
 
     private final IServiceNotification mServiceNotificationCallback =
             new IServiceNotification.Stub() {
@@ -729,10 +718,8 @@ public class HalDeviceManager {
         }
     }
 
-    private class WifiDeathRecipient implements HwRemoteBinder.DeathRecipient {
-        @Override
-        public void serviceDied(long cookie) {
-            mEventHandler.post(() -> {
+    private final HwRemoteBinder.DeathRecipient mIWifiDeathRecipient =
+            cookie -> {
                 Log.e(TAG, "IWifi HAL service died! Have a listener for it ... cookie=" + cookie);
                 synchronized (mLock) { // prevents race condition with surrounding method
                     mWifi = null;
@@ -740,9 +727,7 @@ public class HalDeviceManager {
                     teardownInternal();
                     // don't restart: wait for registration notification
                 }
-            });
-        }
-    }
+            };
 
     /**
      * Initialize IWifi and register death listener and event callback.
@@ -1279,26 +1264,21 @@ public class HalDeviceManager {
     private class WifiEventCallback extends IWifiEventCallback.Stub {
         @Override
         public void onStart() throws RemoteException {
-            mEventHandler.post(() -> {
-                if (VDBG) Log.d(TAG, "IWifiEventCallback.onStart");
-                // NOP: only happens in reaction to my calls - will handle directly
-            });
+            if (VDBG) Log.d(TAG, "IWifiEventCallback.onStart");
+            // NOP: only happens in reaction to my calls - will handle directly
         }
 
         @Override
         public void onStop() throws RemoteException {
-            mEventHandler.post(() -> {
-                if (VDBG) Log.d(TAG, "IWifiEventCallback.onStop");
-                // NOP: only happens in reaction to my calls - will handle directly
-            });
+            if (VDBG) Log.d(TAG, "IWifiEventCallback.onStop");
+            // NOP: only happens in reaction to my calls - will handle directly
         }
 
         @Override
         public void onFailure(WifiStatus status) throws RemoteException {
-            mEventHandler.post(() -> {
-                Log.e(TAG, "IWifiEventCallback.onFailure: " + statusString(status));
-                teardownInternal();
-            });
+            Log.e(TAG, "IWifiEventCallback.onFailure: " + statusString(status));
+            teardownInternal();
+
             // No need to do anything else: listeners may (will) re-start Wi-Fi
         }
     }
